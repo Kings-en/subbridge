@@ -35,6 +35,7 @@ a = Analysis(
         "argostranslate.package",
         "argostranslate.translate",
         "sentencepiece",
+        "huggingface_hub",
     ],
     hookspath=[],
     hooksconfig={},
