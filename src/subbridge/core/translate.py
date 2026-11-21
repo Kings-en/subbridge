@@ -12,9 +12,13 @@ from typing import Callable
 from .subtitles import Segment
 
 __all__ = [
+    "FEATURED_LANGUAGES",
+    "PIVOT_LANGUAGE",
     "SUPPORTED_LANGUAGES",
     "TranslateError",
     "Translator",
+    "ordered_languages",
+    "translation_path",
 ]
 
 # 界面可选语言：代码 -> 中文名（argos 实际可用的语言包以官方索引为准）。
@@ -39,8 +43,56 @@ SUPPORTED_LANGUAGES: dict[str, str] = {
 }
 
 
+# 中国网友最感兴趣的五种外语：英语、日语、韩语、法语、德语
+# （年轻网民中最受欢迎的五种外语排名），加中文共六种排在界面前面。
+FEATURED_LANGUAGES: list[str] = ["zh", "en", "ja", "ko", "fr", "de"]
+
+# 中转语言：argos 官方语言包索引（2026-11-22 核查，共 100 个包）里，
+# 到中文的直达包只有英语 → 中文；日语/韩语/法语/德语等语言到中文
+# 都要先译成英语、再由英语译成中文（两跳中转）。
+PIVOT_LANGUAGE = "en"
+
+# 除英语外唯一有直达包的语言对（索引核查结果）。
+_DIRECT_EXTRA = {frozenset({"es", "pt"})}
+
+
+def translation_path(source_lang: str, target_lang: str) -> list[tuple[str, str]]:
+    """翻译路线：直达返回一跳，否则经英语中转返回两跳；同语言返回空列表。
+
+    直达规则与 argos 官方索引一致：一端是英语即有直达包（另有西 ↔ 葡）。
+    """
+    if source_lang == target_lang:
+        return []
+    if (
+        source_lang == PIVOT_LANGUAGE
+        or target_lang == PIVOT_LANGUAGE
+        or frozenset({source_lang, target_lang}) in _DIRECT_EXTRA
+    ):
+        return [(source_lang, target_lang)]
+    return [(source_lang, PIVOT_LANGUAGE), (PIVOT_LANGUAGE, target_lang)]
+
+
+def ordered_languages() -> list[tuple[str, str]]:
+    """界面下拉框用的语言顺序：五种热门语言 + 中文排在前面，其余按原顺序。"""
+    ordered = [
+        (code, SUPPORTED_LANGUAGES[code])
+        for code in FEATURED_LANGUAGES
+        if code in SUPPORTED_LANGUAGES
+    ]
+    ordered.extend(
+        (code, name)
+        for code, name in SUPPORTED_LANGUAGES.items()
+        if code not in FEATURED_LANGUAGES
+    )
+    return ordered
+
+
 class TranslateError(Exception):
     """翻译失败（依赖缺失、语言包不可用、下载失败等）。"""
+
+
+class _NoPackageError(TranslateError):
+    """官方索引中没有该语言对的语言包（可改走中转时内部使用）。"""
 
 
 @dataclass
@@ -56,14 +108,21 @@ class Translator:
 
     def __init__(self, config: TranslateConfig | None = None) -> None:
         self.config = config or TranslateConfig()
-        self._translation = None  # 已加载的语言对翻译对象
+        self._chain: list | None = None  # 已加载的翻译步骤（直达 1 步，中转 2 步）
         self._pair: tuple[str, str] | None = None
 
     # -- 内部：加载语言包 -------------------------------------------------
-    def _load_translation(self):
+    def _load_chain(self) -> list:
+        """加载翻译链：直达一跳，否则经英语中转两跳；同语言返回空链。"""
         pair = (self.config.source_lang, self.config.target_lang)
-        if self._translation is not None and self._pair == pair:
-            return self._translation
+        if self._chain is not None and self._pair == pair:
+            return self._chain
+        hops = translation_path(*pair)
+        if not hops:
+            # 同语言：无需翻译，也不依赖 argostranslate。
+            self._chain = []
+            self._pair = pair
+            return []
         try:
             import argostranslate.package as package
             import argostranslate.translate as translate
@@ -72,55 +131,99 @@ class Translator:
                 "未安装 argostranslate，请先执行 pip install argostranslate"
             ) from exc
 
+        try:
+            chain = [
+                self._load_pair(package, translate, from_code, to_code)
+                for from_code, to_code in hops
+            ]
+        except _NoPackageError:
+            # 直达包不存在（官方索引有变）：改走英语中转再试一次。
+            if len(hops) == 1 and pair[0] != PIVOT_LANGUAGE and pair[1] != PIVOT_LANGUAGE:
+                chain = [
+                    self._load_pair(package, translate, from_code, to_code)
+                    for from_code, to_code in [
+                        (pair[0], PIVOT_LANGUAGE),
+                        (PIVOT_LANGUAGE, pair[1]),
+                    ]
+                ]
+            else:
+                raise
+        self._chain = chain
+        self._pair = pair
+        return chain
+
+    def _load_pair(self, package, translate, from_code: str, to_code: str):
+        """加载单个语言对的翻译对象：已安装直接取，未安装则下载安装。
+
+        官方索引中没有该语言对时抛 _NoPackageError（调用方可改走中转）。
+        """
         installed = translate.get_installed_languages()
-        from_lang = next((l for l in installed if l.code == pair[0]), None)
-        to_lang = next((l for l in installed if l.code == pair[1]), None)
-        translation = None
+        from_lang = next((l for l in installed if l.code == from_code), None)
+        to_lang = next((l for l in installed if l.code == to_code), None)
         if from_lang is not None and to_lang is not None:
             translation = from_lang.get_translation(to_lang)
-        if translation is None:
-            # 语言包未安装：从官方索引下载安装（首次需要联网）。
-            translation = self._install_package(package, translate, pair)
-        self._translation = translation
-        self._pair = pair
-        return translation
+            if translation is not None:
+                return translation
+        # 语言包未安装：从官方索引下载安装（首次需要联网）。
+        return self._install_pair(package, translate, from_code, to_code)
 
-    def _install_package(self, package, translate, pair):
+    def _install_pair(self, package, translate, from_code: str, to_code: str):
         try:
             package.update_package_index()
             available = package.get_available_packages()
             candidates = [
-                p for p in available if p.from_code == pair[0] and p.to_code == pair[1]
+                p
+                for p in available
+                if p.from_code == from_code and p.to_code == to_code
             ]
             if not candidates:
-                raise TranslateError(
-                    f"argos 官方索引中没有 {pair[0]} → {pair[1]} 的语言包，"
-                    "请换一对语言再试"
+                raise _NoPackageError(
+                    f"argos 官方索引中没有 {from_code} → {to_code} 的语言包"
                 )
             pkg = candidates[0]
             path = pkg.download()
             package.install_from_path(path)
-        except TranslateError:
+        except _NoPackageError:
             raise
         except Exception as exc:
-            raise TranslateError(f"下载语言包 {pair[0]} → {pair[1]} 失败：{exc}") from exc
+            raise TranslateError(
+                f"下载语言包 {from_code} → {to_code} 失败：{exc}"
+            ) from exc
         installed = translate.get_installed_languages()
-        from_lang = next((l for l in installed if l.code == pair[0]), None)
-        to_lang = next((l for l in installed if l.code == pair[1]), None)
+        from_lang = next((l for l in installed if l.code == from_code), None)
+        to_lang = next((l for l in installed if l.code == to_code), None)
         if from_lang is None or to_lang is None:
-            raise TranslateError(f"语言包 {pair[0]} → {pair[1]} 安装后仍不可用")
-        return from_lang.get_translation(to_lang)
+            raise TranslateError(f"语言包 {from_code} → {to_code} 安装后仍不可用")
+        translation = from_lang.get_translation(to_lang)
+        if translation is None:
+            raise TranslateError(f"语言包 {from_code} → {to_code} 安装后仍不可用")
+        return translation
 
     # -- 翻译 -------------------------------------------------------------
     def translate(self, text: str) -> str:
-        """翻译单段文本。"""
+        """翻译单段文本（中转语言对会依次过两跳；同语言直接返回原文）。"""
         if not text.strip():
             return ""
-        translation = self._load_translation()
+        chain = self._load_chain()
+        if not chain:
+            return text
         try:
-            return translation.translate(text)
+            for step in chain:
+                text = step.translate(text)
+            return text
         except Exception as exc:
             raise TranslateError(f"翻译失败：{exc}") from exc
+
+    def route_description(self) -> str:
+        """当前语言对的翻译路线中文描述，如“日语 → 英语 → 中文（经英语中转）”。"""
+        hops = translation_path(self.config.source_lang, self.config.target_lang)
+        if not hops:
+            return "源语言与目标语言相同，无需翻译"
+        codes = [hops[0][0]] + [to_code for _, to_code in hops]
+        route = " → ".join(SUPPORTED_LANGUAGES.get(code, code) for code in codes)
+        if len(hops) > 1:
+            route += "（经英语中转）"
+        return route
 
     def translate_segments(
         self,
