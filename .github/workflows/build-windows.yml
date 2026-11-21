@@ -1,0 +1,67 @@
+# SubBridge Windows 构建：打包 one-folder 应用，附带 ffmpeg 精简版。
+# - 每次 push / PR 到 main 构建并上传 artifact；
+# - 打 tag v* 时创建 GitHub Release 并附上 zip 包。
+name: 构建 Windows 版
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: PyInstaller 打包
+        run: python -m PyInstaller build\windows\SubBridge.spec --noconfirm
+
+      - name: 下载 ffmpeg 精简版并放入打包目录（gyan.dev）
+        shell: pwsh
+        run: |
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp
+          $dir = Get-ChildItem ffmpeg-tmp -Directory | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path dist\SubBridge\ffmpeg | Out-Null
+          Copy-Item -Recurse "$($dir.FullName)\bin" dist\SubBridge\ffmpeg\bin
+          if (Test-Path dist\SubBridge\ffmpeg\bin\ffmpeg.exe) {
+            Write-Host "ffmpeg 已就位"
+          } else {
+            throw "ffmpeg 未能放入打包目录"
+          }
+
+      - name: 打包 zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\SubBridge -DestinationPath SubBridge-windows-x64.zip
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubBridge-windows-x64
+          path: SubBridge-windows-x64.zip
+
+      - name: 发布 Release（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SubBridge-windows-x64.zip
+          generate_release_notes: true
