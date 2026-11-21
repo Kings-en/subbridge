@@ -193,7 +193,7 @@ class AboutDialog(QDialog):
         self.setWindowTitle("关于 SubBridge")
         layout = QVBoxLayout(self)
         label = QLabel(
-            "<b>SubBridge 1.0.0</b><br>"
+            "<b>SubBridge 1.1.0</b><br>"
             "视频翻译字幕工具：本地转录（faster-whisper）+ "
             "本地翻译（argos-translate），支持双语字幕与单词标记学习模式。<br><br>"
             "v1 词对齐为启发式近似对齐，详见 README“已知限制”。"
