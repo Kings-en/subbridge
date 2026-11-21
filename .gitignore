@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec
+!.gitignore
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# SubBridge 本地数据（模型、缓存、日志）
+models/
+cache/
+*.log
+
+# 操作系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# pytest 缓存
+.pytest_cache/
