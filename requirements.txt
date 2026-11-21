@@ -1,0 +1,4 @@
+# SubBridge 运行时依赖（版本范围，安装时取兼容的最新版）
+PyQt6>=6.5,<7
+faster-whisper>=1.0,<2
+argostranslate>=1.9,<2
