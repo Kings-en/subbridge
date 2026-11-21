@@ -32,7 +32,12 @@ from ..core.subtitles import (
     write_vtt,
 )
 from ..core.transcribe import AVAILABLE_MODELS, TranscribeConfig, Transcriber
-from ..core.translate import TranslateConfig, Translator, ordered_languages
+from ..core.translate import (
+    TRANSLATE_ENGINES,
+    TranslateConfig,
+    Translator,
+    ordered_languages,
+)
 from ..platform import get_platform
 from .dialogs import AboutDialog, ImportSubtitleDialog, SettingsDialog
 from .editor import SubtitleEditor, WordPairPanel
@@ -221,6 +226,12 @@ class MainWindow(QMainWindow):
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         controls.addWidget(self.mode_combo)
 
+        controls.addWidget(QLabel("翻译引擎：", self))
+        self.engine_combo = QComboBox(self)
+        for code, name in TRANSLATE_ENGINES.items():
+            self.engine_combo.addItem(name, code)
+        controls.addWidget(self.engine_combo)
+
         self.transcribe_button = QPushButton("开始转录", self)
         self.transcribe_button.clicked.connect(self.start_transcribe)
         controls.addWidget(self.transcribe_button)
@@ -307,6 +318,9 @@ class MainWindow(QMainWindow):
         self._set_combo(self.model_combo, str(self.settings.value("model_size", "base")))
         mode = str(self.settings.value("mode", "bilingual"))
         self._set_combo(self.mode_combo, mode)
+        self._set_combo(
+            self.engine_combo, str(self.settings.value("translate_engine", "argos"))
+        )
         self.player.set_word_mark_mode(mode == "wordmark")
 
     @staticmethod
@@ -322,6 +336,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("target_lang", self.target_combo.currentData())
         self.settings.setValue("model_size", self.model_combo.currentText())
         self.settings.setValue("mode", self.mode_combo.currentData())
+        self.settings.setValue("translate_engine", self.engine_combo.currentData())
         self.settings.sync()
 
     def open_settings(self) -> None:
@@ -439,6 +454,7 @@ class MainWindow(QMainWindow):
         config = TranslateConfig(
             source_lang=str(self.source_combo.currentData()),
             target_lang=str(self.target_combo.currentData()),
+            engine=str(self.engine_combo.currentData()),
         )
         route = Translator(config).route_description()
         self._set_busy(True, f"正在翻译：{route}…")
