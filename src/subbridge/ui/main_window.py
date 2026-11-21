@@ -32,7 +32,7 @@ from ..core.subtitles import (
     write_vtt,
 )
 from ..core.transcribe import AVAILABLE_MODELS, TranscribeConfig, Transcriber
-from ..core.translate import SUPPORTED_LANGUAGES, TranslateConfig, Translator
+from ..core.translate import TranslateConfig, Translator, ordered_languages
 from ..platform import get_platform
 from .dialogs import AboutDialog, ImportSubtitleDialog, SettingsDialog
 from .editor import SubtitleEditor, WordPairPanel
@@ -199,13 +199,13 @@ class MainWindow(QMainWindow):
 
         controls.addWidget(QLabel("源语言：", self))
         self.source_combo = QComboBox(self)
-        for code, name in SUPPORTED_LANGUAGES.items():
+        for code, name in ordered_languages():
             self.source_combo.addItem(f"{name} ({code})", code)
         controls.addWidget(self.source_combo)
 
         controls.addWidget(QLabel("目标语言：", self))
         self.target_combo = QComboBox(self)
-        for code, name in SUPPORTED_LANGUAGES.items():
+        for code, name in ordered_languages():
             self.target_combo.addItem(f"{name} ({code})", code)
         controls.addWidget(self.target_combo)
 
@@ -440,7 +440,8 @@ class MainWindow(QMainWindow):
             source_lang=str(self.source_combo.currentData()),
             target_lang=str(self.target_combo.currentData()),
         )
-        self._set_busy(True, "正在翻译…")
+        route = Translator(config).route_description()
+        self._set_busy(True, f"正在翻译：{route}…")
         worker = TranslateWorker(self.segments, config, self)
         worker.progress.connect(self._on_progress)
         worker.finished.connect(self._on_translate_finished)
