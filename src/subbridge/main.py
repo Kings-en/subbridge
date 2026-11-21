@@ -15,7 +15,7 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(list(argv) if argv is not None else sys.argv)
     app.setApplicationName("SubBridge")
     app.setOrganizationName("SubBridge")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion("1.1.0")
 
     # 确保配置与缓存目录存在（平台层负责路径）。
     platform = get_platform()
