@@ -15,6 +15,7 @@ __all__ = [
     "FEATURED_LANGUAGES",
     "PIVOT_LANGUAGE",
     "SUPPORTED_LANGUAGES",
+    "TRANSLATE_ENGINES",
     "TranslateError",
     "Translator",
     "ordered_languages",
@@ -87,6 +88,14 @@ def ordered_languages() -> list[tuple[str, str]]:
     return ordered
 
 
+# 翻译引擎：argos（轻量，语言包小；非英语到中文需经英语中转）；
+# nllb（直达，200 种语言互译；首次使用下载约 617MB 模型）。
+TRANSLATE_ENGINES: dict[str, str] = {
+    "argos": "argos（轻量）",
+    "nllb": "NLLB 直达",
+}
+
+
 class TranslateError(Exception):
     """翻译失败（依赖缺失、语言包不可用、下载失败等）。"""
 
@@ -101,6 +110,8 @@ class TranslateConfig:
 
     source_lang: str = "en"
     target_lang: str = "zh"
+    # 翻译引擎："argos"（轻量）或 "nllb"（直达）。
+    engine: str = "argos"
 
 
 class Translator:
@@ -110,6 +121,20 @@ class Translator:
         self.config = config or TranslateConfig()
         self._chain: list | None = None  # 已加载的翻译步骤（直达 1 步，中转 2 步）
         self._pair: tuple[str, str] | None = None
+        self._nllb_translator = None  # NLLB 直达翻译器（懒加载）
+
+    def _get_nllb(self):
+        """NLLB 直达翻译器（懒加载）。"""
+        if self._nllb_translator is None:
+            from .nllb import NLLBConfig, NLLBTranslator
+
+            self._nllb_translator = NLLBTranslator(
+                NLLBConfig(
+                    source_lang=self.config.source_lang,
+                    target_lang=self.config.target_lang,
+                )
+            )
+        return self._nllb_translator
 
     # -- 内部：加载语言包 -------------------------------------------------
     def _load_chain(self) -> list:
@@ -204,6 +229,8 @@ class Translator:
         """翻译单段文本（中转语言对会依次过两跳；同语言直接返回原文）。"""
         if not text.strip():
             return ""
+        if self.config.engine == "nllb":
+            return self._get_nllb().translate(text)
         chain = self._load_chain()
         if not chain:
             return text
@@ -216,6 +243,16 @@ class Translator:
 
     def route_description(self) -> str:
         """当前语言对的翻译路线中文描述，如“日语 → 英语 → 中文（经英语中转）”。"""
+        if self.config.engine == "nllb":
+            if self.config.source_lang == self.config.target_lang:
+                return "源语言与目标语言相同，无需翻译"
+            source_name = SUPPORTED_LANGUAGES.get(
+                self.config.source_lang, self.config.source_lang
+            )
+            target_name = SUPPORTED_LANGUAGES.get(
+                self.config.target_lang, self.config.target_lang
+            )
+            return f"NLLB 直达：{source_name} → {target_name}"
         hops = translation_path(self.config.source_lang, self.config.target_lang)
         if not hops:
             return "源语言与目标语言相同，无需翻译"
@@ -231,6 +268,8 @@ class Translator:
         progress_callback: Callable[[float, str], None] | None = None,
     ) -> list[Segment]:
         """逐条翻译字幕段，就地填充 segment.translation。"""
+        if self.config.engine == "nllb":
+            return self._get_nllb().translate_segments(segments, progress_callback)
         total = len(segments)
         for index, segment in enumerate(segments, start=1):
             if segment.text.strip():
