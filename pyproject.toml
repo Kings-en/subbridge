@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subbridge"
+version = "1.0.0"
+description = "视频翻译字幕工具：本地转录 + 本地翻译，支持双语字幕与单词标记学习模式"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "SubBridge" }]
+dependencies = [
+    "PyQt6>=6.5,<7",
+    "faster-whisper>=1.0,<2",
+    "argostranslate>=1.9,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pyinstaller>=6",
+]
+
+[project.scripts]
+subbridge = "subbridge.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
