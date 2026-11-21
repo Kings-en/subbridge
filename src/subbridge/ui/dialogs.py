@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..core.translate import SUPPORTED_LANGUAGES
+from ..core.translate import ordered_languages
 from ..core.transcribe import AVAILABLE_MODELS
 from ..platform import get_platform
 
@@ -36,13 +36,13 @@ class SettingsDialog(QDialog):
         layout = QFormLayout(self)
 
         self.source_combo = QComboBox(self)
-        for code, name in SUPPORTED_LANGUAGES.items():
+        for code, name in ordered_languages():
             self.source_combo.addItem(f"{name} ({code})", code)
         self.source_combo.setCurrentText("英语 (en)")
         layout.addRow("源语言：", self.source_combo)
 
         self.target_combo = QComboBox(self)
-        for code, name in SUPPORTED_LANGUAGES.items():
+        for code, name in ordered_languages():
             self.target_combo.addItem(f"{name} ({code})", code)
         self.target_combo.setCurrentText("中文 (zh)")
         layout.addRow("目标语言：", self.target_combo)
